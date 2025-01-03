@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import { logger } from '../utils/logger';
 
 export class HttpException extends Error {
     constructor(public status: number, public message: string) {
@@ -8,17 +9,43 @@ export class HttpException extends Error {
     }
 }
 
-export const errorHandler = (
-    _error: HttpException,
-    _req: Request,
-    res: Response,
-    _next: NextFunction
-): void => {
-    const status = _error.status || 500;
-    const message = _error.message || 'Something went wrong';
+export class ErrorHandlerMiddleware {
+    private static instance: ErrorHandlerMiddleware;
 
-    res.status(status).json({
-        status,
-        message,
-    });
-};
+    private constructor() {}
+
+    public static getInstance(): ErrorHandlerMiddleware {
+        if (!ErrorHandlerMiddleware.instance) {
+            ErrorHandlerMiddleware.instance = new ErrorHandlerMiddleware();
+        }
+        return ErrorHandlerMiddleware.instance;
+    }
+
+    public handleError(
+        error: HttpException,
+        _req: Request,
+        res: Response,
+        _next: NextFunction
+    ): void {
+        const status = error.status || 500;
+        const message = error.message || 'Something went wrong';
+
+        // Log the error
+        logger.error('Error occurred', {
+            status,
+            message,
+            stack: error.stack,
+        });
+
+        res.status(status).json({
+            status,
+            message,
+        });
+    }
+
+    public getMiddleware() {
+        return this.handleError.bind(this);
+    }
+}
+
+export const errorHandler = ErrorHandlerMiddleware.getInstance().getMiddleware();
