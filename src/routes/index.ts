@@ -32,7 +32,7 @@ export class Routes {
 
   private initializeRoutes(): void {
     this.routes.forEach((route) => {
-      this.router.use("/", route.router);
+      this.router.use(route.path, route.router);
     });
   }
 }
