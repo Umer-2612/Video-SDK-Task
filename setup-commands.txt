@@ -1,0 +1,60 @@
+Local Development Setup Commands
+================================
+
+Prerequisites:
+-------------
+1. Make sure Docker Desktop is installed and running
+2. Ensure you're in the project root directory
+
+Step-by-Step Commands:
+---------------------
+
+1. Clean up existing containers and volumes:
+   ```
+   docker-compose down -v
+   ```
+
+2. Start Elasticsearch container:
+   ```
+   docker-compose up elasticsearch -d
+   ```
+
+3. Check if Elasticsearch is ready:
+   ```
+   curl http://localhost:9200
+   ```
+   Note: Wait for a JSON response with version info. If you get an error, wait 30 seconds and try again.
+
+4. Start Node.js server:
+   ```
+   npm run dev
+   ```
+
+Useful Additional Commands:
+-------------------------
+
+Stop Services:
+- Stop Node.js server: Press Ctrl+C in the terminal
+- Stop Elasticsearch: docker-compose stop elasticsearch
+
+View Logs:
+- Elasticsearch logs: docker-compose logs elasticsearch
+- Follow Elasticsearch logs: docker-compose logs -f elasticsearch
+
+Restart Services:
+- Restart Elasticsearch: docker-compose restart elasticsearch
+- Full restart (both services): docker-compose down && docker-compose up -d
+
+Troubleshooting:
+---------------
+1. If Elasticsearch connection fails:
+   - Ensure Docker Desktop is running
+   - Check if Elasticsearch is healthy: curl http://localhost:9200
+   - View Elasticsearch logs: docker-compose logs elasticsearch
+
+2. If Node.js server won't start:
+   - Ensure all environment variables are set in .env
+   - Check if MongoDB Atlas connection string is correct
+   - Verify Elasticsearch is running before starting the server
+
+Note: Always start Elasticsearch before the Node.js server to ensure proper connection.

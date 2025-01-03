@@ -6,20 +6,23 @@ import compression from "compression";
 import { logger } from "../utils/logger";
 import "../middleware/ensureLogsDir";
 import { MongoDBConnection } from "../database/mongodb.connection";
+import { ElasticsearchConnection } from "../database/elasticsearch.connection";
 
 export class Server {
   private readonly mongodb = MongoDBConnection.getInstance();
+  private readonly elasticsearch = ElasticsearchConnection.getInstance();
 
   constructor(private app: Application) {
     this.config();
-    this.initializeMongoDB();
+    this.initializeDatabases();
   }
 
-  private async initializeMongoDB(): Promise<void> {
+  private async initializeDatabases(): Promise<void> {
     try {
       await this.mongodb.connect();
+      await this.elasticsearch.connect();
     } catch (error) {
-      logger.error("Failed to connect to MongoDB:", error);
+      logger.error("Failed to connect to databases:", error);
       process.exit(1);
     }
   }
@@ -53,5 +56,6 @@ export class Server {
 
   public async closeConnections(): Promise<void> {
     await this.mongodb.disconnect();
+    await this.elasticsearch.disconnect();
   }
 }
