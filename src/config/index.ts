@@ -25,6 +25,14 @@ interface IConfig {
   logs: {
     level: string;
   };
+  database: {
+    mongodb: {
+      uri: string;
+      options: {
+        dbName: string;
+      };
+    };
+  };
 }
 
 export class Config {
@@ -53,6 +61,16 @@ export class Config {
       },
       logs: {
         level: process.env.LOG_LEVEL || "debug",
+      },
+      database: {
+        mongodb: {
+          uri:
+            process.env.MONGODB_URI ||
+            "mongodb://localhost:27017/notification-system",
+          options: {
+            dbName: process.env.MONGODB_DB_NAME || "notification-system",
+          },
+        },
       },
     };
   }

@@ -4,11 +4,24 @@ import cors from "cors";
 import helmet from "helmet";
 import compression from "compression";
 import { logger } from "../utils/logger";
-import '../middleware/ensureLogsDir';
+import "../middleware/ensureLogsDir";
+import { MongoDBConnection } from "../database/mongodb.connection";
 
 export class Server {
+  private readonly mongodb = MongoDBConnection.getInstance();
+
   constructor(private app: Application) {
     this.config();
+    this.initializeMongoDB();
+  }
+
+  private async initializeMongoDB(): Promise<void> {
+    try {
+      await this.mongodb.connect();
+    } catch (error) {
+      logger.error("Failed to connect to MongoDB:", error);
+      process.exit(1);
+    }
   }
 
   private config(): void {
@@ -36,5 +49,9 @@ export class Server {
         next();
       });
     }
+  }
+
+  public async closeConnections(): Promise<void> {
+    await this.mongodb.disconnect();
   }
 }
