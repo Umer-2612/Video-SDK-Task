@@ -3,16 +3,27 @@ import { config } from "./config";
 import { logger } from "./utils/logger";
 import { Server } from "./server/server";
 import { routes } from "./routes";
+import { setupSwagger } from "./swagger";
 
 const app = express();
 const server = new Server(app);
 
+// Setup Swagger before routes
+setupSwagger(app);
+
 // Routes
 app.use(config.api.prefix, routes);
+
+// Default route for root path
+app.get('/', (_req, res) => {
+  res.redirect('/docs');
+});
 
 // Start server
 const httpServer = app.listen(config.port, () => {
   logger.info(`Server listening on port ${config.port}`);
+  logger.info(`API Documentation available at http://localhost:${config.port}/docs`);
+  logger.info(`API Base URL: http://localhost:${config.port}${config.api.prefix}`);
 });
 
 // Graceful shutdown
