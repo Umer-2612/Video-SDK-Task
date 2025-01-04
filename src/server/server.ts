@@ -1,4 +1,4 @@
-import { Application, Request, Response, NextFunction } from "express";
+import { Application, Request, Response, NextFunction, json, urlencoded } from "express";
 import { config } from "../config";
 import cors from "cors";
 import helmet from "helmet";
@@ -30,6 +30,10 @@ export class Server {
   private config(): void {
     // Request logging
     this.app.use(logger.createRequestLogger());
+
+    // Parse JSON bodies
+    this.app.use(json());
+    this.app.use(urlencoded({ extended: true }));
 
     // Security Middleware
     this.app.use(helmet());

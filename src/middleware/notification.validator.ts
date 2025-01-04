@@ -21,6 +21,8 @@ export const validateNotification = (
     abortEarly: false,
   });
 
+  console.log({ error });
+
   if (error) {
     return res.status(400).json({
       status: "error",

@@ -1,5 +1,5 @@
-import { Schema, model } from 'mongoose';
-import { IUser } from '../interfaces/user.interface';
+import { Schema, model } from "mongoose";
+import { IUser } from "../interfaces/user.interface";
 
 const userSchema = new Schema<IUser>(
   {
@@ -27,7 +27,6 @@ const userSchema = new Schema<IUser>(
 );
 
 // Indexes
-userSchema.index({ email: 1 }, { unique: true });
 userSchema.index({ createdAt: 1 });
 
-export const UserModel = model<IUser>('User', userSchema);
+export const UserModel = model<IUser>("User", userSchema);

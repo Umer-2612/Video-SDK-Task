@@ -23,12 +23,15 @@ export class NotificationController {
     res: Response
   ): Promise<void> => {
     try {
+      console.log("helllo");
       const notificationData: INotificationCreate = req.body;
 
       const notification = new NotificationModel({
         ...notificationData,
         status: NotificationStatus.PENDING,
       });
+
+      console.log({ notification });
 
       await notification.save();
 
@@ -49,6 +52,7 @@ export class NotificationController {
         },
       });
     } catch (error) {
+      console.log({ error });
       logger.error("Error creating notification", { error });
       res.status(500).json({
         status: "error",

@@ -2,6 +2,7 @@ import { Router } from "express";
 import { HomeRoutes } from "./home.routes";
 import { LogsRoutes } from "./logs.routes";
 import { NotificationRoutes } from "./notification.routes";
+import { UserRoutes } from "./user.routes";
 import { BaseRoute } from "./route.base";
 
 export class Routes {
@@ -15,6 +16,7 @@ export class Routes {
       new HomeRoutes(),
       new LogsRoutes(),
       new NotificationRoutes(),
+      new UserRoutes(),
     ];
     this.initializeRoutes();
   }

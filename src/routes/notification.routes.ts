@@ -1,7 +1,7 @@
-import { Router } from 'express';
-import { NotificationController } from '../controllers/notification.controller';
-import { validateNotification } from '../middleware/notification.validator';
-import { BaseRoute } from './route.base';
+import { Router } from "express";
+import { NotificationController } from "../controllers/notification.controller";
+import { validateNotification } from "../middleware/notification.validator";
+import { BaseRoute } from "./route.base";
 
 /**
  * @swagger
@@ -17,19 +17,27 @@ import { BaseRoute } from './route.base';
  *     Notification:
  *       type: object
  *       required:
- *         - message
+ *         - userId
  *         - type
+ *         - title
+ *         - content
  *       properties:
- *         message:
+ *         userId:
  *           type: string
- *           description: The notification message
+ *           description: ID of the user to notify
  *         type:
  *           type: string
- *           enum: [info, warning, error]
- *           description: The type of notification
+ *           enum: [email, push, sms]
+ *           description: Type of notification
+ *         title:
+ *           type: string
+ *           description: Notification title
+ *         content:
+ *           type: string
+ *           description: Notification content
  *         metadata:
  *           type: object
- *           description: Additional metadata for the notification
+ *           description: Additional metadata
  */
 
 /**
@@ -49,18 +57,16 @@ import { BaseRoute } from './route.base';
  *         description: Notification created successfully
  *       400:
  *         description: Invalid input data
- *
+ *       404:
+ *         description: User not found
+ */
+
+/**
+ * @swagger
  * /notifications:
  *   get:
  *     summary: Get all notifications
  *     tags: [Notifications]
- *     parameters:
- *       - in: query
- *         name: type
- *         schema:
- *           type: string
- *           enum: [info, warning, error]
- *         description: Filter notifications by type
  *     responses:
  *       200:
  *         description: List of notifications
@@ -72,7 +78,7 @@ import { BaseRoute } from './route.base';
  *                 $ref: '#/components/schemas/Notification'
  */
 export class NotificationRoutes extends BaseRoute {
-  public path = '/notifications';
+  public path = "/notifications";
   public router = Router();
   private readonly controller = NotificationController.getInstance();
 
@@ -84,15 +90,12 @@ export class NotificationRoutes extends BaseRoute {
   private initializeRoutes(): void {
     // Create notification
     this.router.post(
-      `${this.path}/notify`,
+      "/notify",
       validateNotification,
       this.controller.createNotification
     );
 
     // Get notifications with filters
-    this.router.get(
-      this.path,
-      this.controller.getNotifications
-    );
+    this.router.get("/", this.controller.getNotifications);
   }
 }
