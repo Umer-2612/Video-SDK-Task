@@ -63,6 +63,7 @@ export class LogsController {
         dates: logDates,
       });
     } catch (error) {
+      console.log({ error });
       throw new HttpException(500, "Error retrieving log dates");
     }
   };
