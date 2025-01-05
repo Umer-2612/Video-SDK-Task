@@ -16,6 +16,8 @@ services:
       - KAFKA_GROUP_ID=notification-processor
       - KAFKA_MAX_RETRIES=3
       - KAFKA_INITIAL_RETRY_TIME=100
+      - LOG_LEVEL=debug
+      - LOG_DIR=/app/logs
     depends_on:
       elasticsearch:
         condition: service_healthy
@@ -26,6 +28,7 @@ services:
     volumes:
       - .:/app
       - /app/node_modules
+      - ./logs:/app/logs
       - kafka_logs:/tmp/kafka-logs
     networks:
       - app-network

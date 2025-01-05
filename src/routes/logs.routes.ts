@@ -34,7 +34,7 @@ import { LogsController } from "../controllers/logs.controller";
 
 /**
  * @swagger
- * /daily:
+ * /logs/daily:
  *   get:
  *     summary: Get logs for a specific date
  *     tags: [Logs]
@@ -55,7 +55,7 @@ import { LogsController } from "../controllers/logs.controller";
  *               items:
  *                 $ref: '#/components/schemas/LogEntry'
  *
- * /dates:
+ * /logs/dates:
  *   get:
  *     summary: Get list of available log dates
  *     tags: [Logs]
