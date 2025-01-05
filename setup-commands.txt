@@ -1,60 +1,168 @@
-Local Development Setup Commands
-================================
+# Notification Service Setup and Commands Guide
 
-Prerequisites:
--------------
-1. Make sure Docker Desktop is installed and running
-2. Ensure you're in the project root directory
+## Initial Setup (First Time Only)
+1. Install dependencies:
+```bash
+npm install
+```
 
-Step-by-Step Commands:
----------------------
+2. Create .env file from example:
+```bash
+cp .env.example .env
+```
 
-1. Clean up existing containers and volumes:
-   ```
-   docker-compose down -v
-   ```
+3. Build the TypeScript code:
+```bash
+npm run build
+```
 
-2. Start Elasticsearch container:
-   ```
-   docker-compose up elasticsearch -d
-   ```
+## Starting the Project
+1. Start Elasticsearch, Kafka, and Zookeeper first:
+```bash
+# Start Elasticsearch
+docker-compose up -d elasticsearch
 
-3. Check if Elasticsearch is ready:
-   ```
-   curl http://localhost:9200
-   ```
-   Note: Wait for a JSON response with version info. If you get an error, wait 30 seconds and try again.
+# Wait for Elasticsearch to be ready (usually takes 30-45 seconds)
+# Check Elasticsearch health
+curl http://localhost:9200/_cluster/health
 
-4. Start Node.js server:
-   ```
-   npm run dev
-   ```
+# Start Kafka and Zookeeper
+docker-compose up -d zookeeper kafka
 
-Useful Additional Commands:
--------------------------
+# Wait for Kafka to be ready (usually takes 15-30 seconds)
+# You can check logs to ensure it's ready
+docker-compose logs -f kafka
+```
 
-Stop Services:
-- Stop Node.js server: Press Ctrl+C in the terminal
-- Stop Elasticsearch: docker-compose stop elasticsearch
+2. Once the above services are ready, start the application:
+```bash
+# Start the application
+docker-compose up -d app
 
-View Logs:
-- Elasticsearch logs: docker-compose logs elasticsearch
-- Follow Elasticsearch logs: docker-compose logs -f elasticsearch
+# Check application logs
+docker-compose logs -f app
+```
 
-Restart Services:
-- Restart Elasticsearch: docker-compose restart elasticsearch
-- Full restart (both services): docker-compose down && docker-compose up -d
+3. Verify all services are running:
+```bash
+docker-compose ps
+```
 
-Troubleshooting:
----------------
-1. If Elasticsearch connection fails:
-   - Ensure Docker Desktop is running
-   - Check if Elasticsearch is healthy: curl http://localhost:9200
-   - View Elasticsearch logs: docker-compose logs elasticsearch
+Expected services and their states:
+- elasticsearch: healthy
+- zookeeper: running
+- kafka: running
+- app: running
 
-2. If Node.js server won't start:
-   - Ensure all environment variables are set in .env
-   - Check if MongoDB Atlas connection string is correct
-   - Verify Elasticsearch is running before starting the server
+## Stopping the Project
+1. Stop all services:
+```bash
+docker-compose down
+```
 
-Note: Always start Elasticsearch before the Node.js server to ensure proper connection.
+2. Stop and remove volumes (if needed to clean data):
+```bash
+docker-compose down -v
+```
+
+## Development Commands
+1. Rebuild the application:
+```bash
+npm run build
+```
+
+2. Restart only the application container:
+```bash
+docker-compose restart app
+```
+
+3. View application logs:
+```bash
+docker-compose logs -f app
+```
+
+## Testing API Endpoints
+1. Create a test user:
+```bash
+curl -X POST http://localhost:3000/api/v1/users \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userId": "test123",
+    "email": "test@example.com",
+    "name": "Test User"
+  }'
+```
+
+2. Set up notification preferences:
+```bash
+curl -X PUT http://localhost:3000/api/v1/notification-preferences/test123 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "channels": {
+      "email": {
+        "enabled": true,
+        "quietHours": {
+          "start": "22:00",
+          "end": "08:00"
+        },
+        "limits": {
+          "hourly": 5,
+          "daily": 20
+        }
+      },
+      "sms": {
+        "enabled": true,
+        "limits": {
+          "hourly": 2,
+          "daily": 10
+        }
+      },
+      "push": {
+        "enabled": true
+      }
+    },
+    "globalQuietHours": {
+      "enabled": true,
+      "start": "23:00",
+      "end": "07:00"
+    }
+  }'
+```
+
+3. Send a test notification:
+```bash
+curl -X POST http://localhost:3000/api/v1/notifications/notify \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userId": "test123",
+    "type": "email",
+    "category": "system",
+    "priority": "high",
+    "title": "Test Notification",
+    "content": "This is a test notification",
+    "message": "Hello, this is a test!"
+  }'
+```
+
+## Troubleshooting
+1. If containers aren't starting:
+   - Check Docker daemon is running
+   - Check ports 3000, 9092, 9200 are free
+
+2. If application isn't responding:
+   - Check container logs: `docker-compose logs app`
+   - Rebuild and restart: 
+     ```bash
+     npm run build
+     docker-compose restart app
+     ```
+
+3. To reset everything and start fresh:
+```bash
+docker-compose down -v
+docker-compose up -d
+```
+
+## API Documentation
+- Swagger UI: http://localhost:3000/docs
+- API Base URL: http://localhost:3000/api/v1

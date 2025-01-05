@@ -1,17 +1,31 @@
 import { Schema, model } from "mongoose";
-import { INotificationPreference } from "../interfaces/notification-preference.interface";
+import {
+  INotificationPreference,
+  IChannelPreference,
+} from "../interfaces/notification-preference.interface";
 
-const notificationChannelSchema = new Schema(
+const channelPreferenceSchema = new Schema<IChannelPreference>(
   {
     enabled: {
       type: Boolean,
-      default: false,
+      required: true,
+      default: true,
     },
-    config: {
-      email: String,
-      phoneNumber: String,
-      deviceTokens: [String],
-      webhookUrl: String,
+    quietHours: {
+      start: String,
+      end: String,
+    },
+    limits: {
+      hourly: {
+        type: Number,
+        min: 0,
+        default: 10,
+      },
+      daily: {
+        type: Number,
+        min: 0,
+        default: 50,
+      },
     },
   },
   { _id: false }
@@ -23,59 +37,43 @@ const notificationPreferenceSchema = new Schema<INotificationPreference>(
       type: String,
       required: true,
       unique: true,
+      index: true,
     },
     channels: {
-      email: {
-        type: notificationChannelSchema,
-        required: true,
-      },
-      push: {
-        type: notificationChannelSchema,
-        required: true,
-      },
-      sms: {
-        type: notificationChannelSchema,
-        required: true,
-      },
-      webhook: notificationChannelSchema,
+      email: channelPreferenceSchema,
+      sms: channelPreferenceSchema,
+      push: channelPreferenceSchema,
     },
-    categories: {
-      marketing: {
+    globalQuietHours: {
+      enabled: {
         type: Boolean,
-        default: true,
+        default: false,
       },
-      system: {
-        type: Boolean,
-        default: true,
-      },
-      security: {
-        type: Boolean,
-        default: true,
-      },
+      start: String,
+      end: String,
     },
-    schedules: {
-      quietHours: {
-        start: String,
-        end: String,
-        timezone: String,
+    globalLimits: {
+      hourly: {
+        type: Number,
+        min: 0,
+        default: 20,
       },
-      deliveryWindow: {
-        start: String,
-        end: String,
-        timezone: String,
+      daily: {
+        type: Number,
+        min: 0,
+        default: 100,
       },
     },
   },
   {
     timestamps: true,
-    versionKey: false,
   }
 );
 
-// Indexes
+// Indexes for efficient querying
 notificationPreferenceSchema.index({ "channels.email.enabled": 1 });
-notificationPreferenceSchema.index({ "channels.push.enabled": 1 });
 notificationPreferenceSchema.index({ "channels.sms.enabled": 1 });
+notificationPreferenceSchema.index({ "channels.push.enabled": 1 });
 
 export const NotificationPreferenceModel = model<INotificationPreference>(
   "NotificationPreference",

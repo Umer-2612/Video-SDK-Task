@@ -1,40 +1,31 @@
-export interface INotificationChannel {
+export interface IChannelPreference {
   enabled: boolean;
-  config?: {
-    email?: string;
-    phoneNumber?: string;
-    deviceTokens?: string[];
-    webhookUrl?: string;
+  quietHours?: {
+    start: string; // HH:mm format
+    end: string;   // HH:mm format
+  };
+  limits?: {
+    hourly: number;
+    daily: number;
   };
 }
 
 export interface INotificationPreference {
-  _id?: string;
   userId: string;
   channels: {
-    email: INotificationChannel;
-    push: INotificationChannel;
-    sms: INotificationChannel;
-    webhook?: INotificationChannel;
+    email: IChannelPreference;
+    sms: IChannelPreference;
+    push: IChannelPreference;
   };
-  categories: {
-    marketing: boolean;
-    system: boolean;
-    security: boolean;
-    [key: string]: boolean;
+  globalQuietHours?: {
+    enabled: boolean;
+    start: string;
+    end: string;
   };
-  schedules?: {
-    quietHours?: {
-      start: string; // HH:mm format
-      end: string;
-      timezone: string;
-    };
-    deliveryWindow?: {
-      start: string;
-      end: string;
-      timezone: string;
-    };
+  globalLimits?: {
+    hourly: number;
+    daily: number;
   };
-  createdAt: Date;
-  updatedAt: Date;
+  createdAt?: Date;
+  updatedAt?: Date;
 }

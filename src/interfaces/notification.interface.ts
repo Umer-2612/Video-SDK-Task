@@ -12,9 +12,8 @@ export enum NotificationStatus {
 
 export enum NotificationType {
   EMAIL = "email",
-  PUSH = "push",
   SMS = "sms",
-  WEBHOOK = "webhook",
+  PUSH = "push",
 }
 
 export enum NotificationPriority {

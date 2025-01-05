@@ -1,5 +1,6 @@
 import { Kafka, Producer, Consumer } from "kafkajs";
 import { logger } from "../utils/logger";
+import { kafkaConfig } from "../config/kafka.config";
 
 class KafkaService {
   private kafka: Kafka;
@@ -7,13 +8,7 @@ class KafkaService {
   private consumers: Map<string, Consumer>;
 
   constructor() {
-    this.kafka = new Kafka({
-      clientId: "notification-service",
-      brokers:
-        process.env.NODE_ENV === "production"
-          ? ["kafka:29092"] // Inside Docker network
-          : ["localhost:9092"], // Local development
-    });
+    this.kafka = new Kafka(kafkaConfig);
     this.producer = this.kafka.producer();
     this.consumers = new Map();
   }

@@ -7,12 +7,10 @@ import {
   NotificationPriority,
   NotificationType,
   INotificationCreate,
-  INotification,
-  INotificationDeliveryAttempt,
 } from "../interfaces/notification.interface";
-import { INotificationPreference } from "../interfaces/notification-preference.interface";
 import { logger } from "../utils/logger";
 import kafkaService from "../services/kafka.service";
+import { NotificationProcessorService } from "../services/notification-processor.service";
 
 interface KafkaNotificationMessage {
   notificationId: string;
@@ -25,8 +23,10 @@ const NOTIFICATION_TOPIC = "notifications";
 
 export class NotificationController {
   private static instance: NotificationController;
+  private readonly processorService: NotificationProcessorService;
 
   private constructor() {
+    this.processorService = NotificationProcessorService.getInstance();
     this.initializeKafka();
   }
 
@@ -118,186 +118,6 @@ export class NotificationController {
     }
   };
 
-  private async processNotification(
-    message: KafkaNotificationMessage
-  ): Promise<void> {
-    try {
-      const { notificationId, priority } = message;
-
-      // Fetch notification from database
-      const notification = await NotificationModel.findById(notificationId);
-      if (!notification) {
-        logger.error(`Notification not found: ${notificationId}`);
-        return;
-      }
-
-      // Get user preferences
-      const preferences = await NotificationPreferenceModel.findOne({
-        userId: notification.userId,
-      });
-
-      if (!preferences) {
-        logger.error(
-          `User preferences not found for user: ${notification.userId}`
-        );
-        return;
-      }
-
-      // Process based on priority
-      if (
-        priority === NotificationPriority.HIGH ||
-        priority === NotificationPriority.URGENT
-      ) {
-        // Process immediately
-        await this.deliverNotification(notification, preferences);
-      } else {
-        // Check quiet hours and other rules
-        if (this.isWithinQuietHours(preferences)) {
-          // Reschedule for after quiet hours
-          notification.status = NotificationStatus.SCHEDULED;
-          notification.scheduledTime = this.getNextActiveTime(preferences);
-          await notification.save();
-
-          logger.info(
-            `Notification ${notificationId} rescheduled due to quiet hours`
-          );
-        } else {
-          await this.deliverNotification(notification, preferences);
-        }
-      }
-    } catch (error) {
-      logger.error("Error processing notification:", error);
-    }
-  }
-
-  private async deliverNotification(
-    notification: INotification,
-    preferences: INotificationPreference
-  ): Promise<void> {
-    try {
-      // Update status to processing
-      await NotificationModel.findByIdAndUpdate(notification._id, {
-        status: NotificationStatus.PROCESSING,
-      });
-
-      // TODO: Implement actual delivery logic based on notification type and preferences
-      let deliverySuccess = false;
-
-      switch (notification.type) {
-        case NotificationType.EMAIL:
-          if (preferences.channels.email?.enabled) {
-            // Implement email delivery
-            deliverySuccess = true;
-          }
-          break;
-        case NotificationType.SMS:
-          if (preferences.channels.sms?.enabled) {
-            // Implement SMS delivery
-            deliverySuccess = true;
-          }
-          break;
-        case NotificationType.PUSH:
-          if (preferences.channels.push?.enabled) {
-            // Implement push notification delivery
-            deliverySuccess = true;
-          }
-          break;
-        default:
-          throw new Error(
-            `Unsupported notification type: ${notification.type}`
-          );
-      }
-
-      const deliveryAttempt: INotificationDeliveryAttempt = {
-        timestamp: new Date(),
-        status: deliverySuccess
-          ? NotificationStatus.SENT
-          : NotificationStatus.FAILED,
-        error: deliverySuccess ? undefined : "Failed to deliver notification",
-      };
-
-      // Update notification with delivery attempt
-      await NotificationModel.findByIdAndUpdate(notification._id, {
-        status: deliverySuccess
-          ? NotificationStatus.SENT
-          : NotificationStatus.FAILED,
-        $push: { deliveryAttempts: deliveryAttempt },
-      });
-
-      if (deliverySuccess) {
-        logger.info(`Notification ${notification._id} delivered successfully`);
-      } else {
-        logger.error(`Failed to deliver notification ${notification._id}`);
-      }
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : "Unknown error occurred";
-      logger.error(`Error delivering notification ${notification._id}:`, error);
-
-      await NotificationModel.findByIdAndUpdate(notification._id, {
-        status: NotificationStatus.FAILED,
-        $push: {
-          deliveryAttempts: {
-            timestamp: new Date(),
-            status: NotificationStatus.FAILED,
-            error: errorMessage,
-          },
-        },
-      });
-    }
-  }
-
-  private isWithinQuietHours(preferences: INotificationPreference): boolean {
-    if (
-      !preferences.schedules?.quietHours?.start ||
-      !preferences.schedules?.quietHours?.end
-    ) {
-      return false;
-    }
-
-    const now = new Date();
-    const [startHour, startMinute] = preferences.schedules.quietHours.start
-      .split(":")
-      .map(Number);
-    const [endHour, endMinute] = preferences.schedules.quietHours.end
-      .split(":")
-      .map(Number);
-
-    const currentHour = now.getHours();
-    const currentMinute = now.getMinutes();
-
-    const currentTime = currentHour * 60 + currentMinute;
-    const quietStart = startHour * 60 + startMinute;
-    const quietEnd = endHour * 60 + endMinute;
-
-    if (quietStart <= quietEnd) {
-      return currentTime >= quietStart && currentTime <= quietEnd;
-    } else {
-      // Handle case where quiet hours span midnight
-      return currentTime >= quietStart || currentTime <= quietEnd;
-    }
-  }
-
-  private getNextActiveTime(preferences: INotificationPreference): Date {
-    const now = new Date();
-
-    if (!preferences.schedules?.quietHours?.end) {
-      return now;
-    }
-
-    const [endHour, endMinute] = preferences.schedules.quietHours.end
-      .split(":")
-      .map(Number);
-    const nextActive = new Date(now);
-
-    nextActive.setHours(endHour, endMinute, 0, 0);
-    if (nextActive <= now) {
-      nextActive.setDate(nextActive.getDate() + 1);
-    }
-
-    return nextActive;
-  }
-
   public getNotifications = async (
     req: Request,
     res: Response
@@ -358,4 +178,24 @@ export class NotificationController {
       });
     }
   };
+
+  private async processNotification(
+    message: KafkaNotificationMessage
+  ): Promise<void> {
+    try {
+      const { notificationId } = message;
+
+      // Fetch notification from database
+      const notification = await NotificationModel.findById(notificationId);
+      if (!notification) {
+        logger.error(`Notification not found: ${notificationId}`);
+        return;
+      }
+
+      // Process notification using the processor service
+      await this.processorService.processNotification(notification);
+    } catch (error) {
+      logger.error("Error processing notification from Kafka:", error);
+    }
+  }
 }

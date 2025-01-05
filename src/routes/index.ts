@@ -3,6 +3,7 @@ import { HomeRoutes } from "./home.routes";
 import { LogsRoutes } from "./logs.routes";
 import { NotificationRoutes } from "./notification.routes";
 import { UserRoutes } from "./user.routes";
+import { NotificationPreferenceRoutes } from "./notification-preference.routes";
 import { BaseRoute } from "./route.base";
 
 export class Routes {
@@ -17,6 +18,7 @@ export class Routes {
       new LogsRoutes(),
       new NotificationRoutes(),
       new UserRoutes(),
+      new NotificationPreferenceRoutes(),
     ];
     this.initializeRoutes();
   }
