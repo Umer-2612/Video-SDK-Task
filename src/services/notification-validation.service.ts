@@ -1,10 +1,9 @@
 import {
   INotificationCreate,
   NotificationType,
-  NotificationCategory,
 } from "../interfaces/notification.interface";
 import { UserModel } from "../models/user.model";
-import { NotificationPreferenceModel } from "../models/notification-preference.model";
+import { UserPreferencesModel } from "../models/user-preferences.model";
 import { logger } from "../utils/logger";
 
 export interface ValidationResult {
@@ -33,9 +32,6 @@ export class NotificationValidationService {
     // Required fields validation
     if (!data.userId) errors.push("userId is required");
     if (!data.type) errors.push("type is required");
-    if (!data.category) errors.push("category is required");
-    if (!data.title) errors.push("title is required");
-    if (!data.content) errors.push("content is required");
     if (!data.message) errors.push("message is required");
 
     // Return early if basic validation fails
@@ -49,22 +45,18 @@ export class NotificationValidationService {
     ) {
       errors.push("Invalid notification type");
     }
-    if (
-      !Object.values(NotificationCategory).includes(
-        data.category as NotificationCategory
-      )
-    ) {
-      errors.push("Invalid notification category");
-    }
 
     // Check if user exists
-    const userExists = await this.validateUser(data.userId);
+    const userExists = await this.validateUser(String(data.userId));
     if (!userExists) {
       errors.push("User not found");
     }
 
     // Check if notification type is enabled for user
-    const channelEnabled = await this.validateChannel(data.type, data.userId);
+    const channelEnabled = await this.validateChannel(
+      data.type,
+      String(data.userId)
+    );
     if (!channelEnabled) {
       errors.push(`${data.type} notifications are disabled for this user`);
     }
@@ -90,10 +82,15 @@ export class NotificationValidationService {
     userId: string
   ): Promise<boolean> {
     try {
-      const preferences = await NotificationPreferenceModel.findOne({ userId });
+      const preferences = await UserPreferencesModel.findOne({ userId });
       if (!preferences) return true; // If no preferences set, assume all channels are enabled
 
-      return !!preferences.channels[type]?.enabled;
+      const channelKey = type.toLowerCase();
+      return (
+        preferences.notifications[
+          channelKey as keyof typeof preferences.notifications
+        ]?.enabled ?? true
+      );
     } catch (error) {
       logger.error("Error validating channel:", error);
       return false;

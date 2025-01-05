@@ -1,47 +1,36 @@
 import { Request, Response } from "express";
 import { NotificationModel } from "../models/notification.model";
+import { UserPreferencesModel } from "../models/user-preferences.model";
 import {
   NotificationStatus,
+  NotificationPriority,
   INotificationCreate,
 } from "../interfaces/notification.interface";
 import { logger } from "../utils/logger";
-import kafkaService from "../services/kafka.service";
-import { NotificationProcessorService } from "../services/notification-processor.service";
-import { NotificationValidationService } from "../services/notification-validation.service";
-
-interface KafkaNotificationMessage {
-  notificationData: INotificationCreate;
-}
-
-const NOTIFICATION_TOPIC = "notifications";
+import { NotificationDeliveryService } from "../services/notification-delivery.service";
+import { NotificationSchedulerService } from "../services/notification-scheduler.service";
+import { NotificationAggregatorService } from "../services/notification-aggregator.service";
+import KafkaService from "../services/kafka.service";
+import { createHash } from "crypto";
+import { Types } from "mongoose";
 
 export class NotificationController {
   private static instance: NotificationController;
-  private readonly processorService: NotificationProcessorService;
-  private readonly validationService: NotificationValidationService;
+  private readonly deliveryService: NotificationDeliveryService;
+  private readonly schedulerService: NotificationSchedulerService;
+  private readonly aggregatorService: NotificationAggregatorService;
+  private readonly kafkaService: typeof KafkaService;
+  private readonly DEDUP_WINDOW_MS = 3600000; // 1 hour
 
   private constructor() {
-    this.processorService = NotificationProcessorService.getInstance();
-    this.validationService = NotificationValidationService.getInstance();
-    this.initializeKafka();
-  }
+    this.deliveryService = NotificationDeliveryService.getInstance();
+    this.schedulerService = NotificationSchedulerService.getInstance();
+    this.aggregatorService = NotificationAggregatorService.getInstance();
+    this.kafkaService = KafkaService;
 
-  private async initializeKafka(): Promise<void> {
-    try {
-      await kafkaService.connect();
-      await kafkaService.createTopic(NOTIFICATION_TOPIC);
-
-      // Start consuming messages for processing
-      await kafkaService.consume(
-        NOTIFICATION_TOPIC,
-        "notification-processor",
-        async (message) => {
-          await this.processKafkaMessage(message);
-        }
-      );
-    } catch (error) {
-      logger.error("Failed to initialize Kafka", error);
-    }
+    // Start services
+    this.schedulerService.startScheduler();
+    this.aggregatorService.startAggregator();
   }
 
   public static getInstance(): NotificationController {
@@ -51,81 +40,142 @@ export class NotificationController {
     return NotificationController.instance;
   }
 
-  public createNotification = async (
-    req: Request,
-    res: Response
-  ): Promise<void> => {
+  public async createNotification(req: Request, res: Response): Promise<void> {
     try {
-      const notificationData: INotificationCreate = req.body;
+      const notificationData: INotificationCreate = {
+        ...req.body,
+        userId: new Types.ObjectId(req.body.userId),
+      };
 
-      // Validate notification data
-      const validationResult =
-        await this.validationService.validateNotification(notificationData);
-      if (!validationResult.isValid) {
-        res.status(400).json({
+      console.log({ aa: notificationData.userId });
+
+      const userPrefstemp = await UserPreferencesModel.findOne({
+        userId: notificationData.userId,
+      });
+
+      console.log({ userPrefstemp });
+
+      // Check user preferences
+      const userPrefs = await UserPreferencesModel.findOne({
+        userId: notificationData.userId,
+      });
+
+      if (!userPrefs) {
+        res.status(404).json({
           status: "error",
-          errors: validationResult.errors,
+          message: "User preferences not found",
         });
         return;
       }
 
-      // Send to Kafka for processing
-      const kafkaMessage: KafkaNotificationMessage = {
-        notificationData,
-      };
+      // Check if the notification channel is enabled
+      const channelKey = notificationData.type.toLowerCase();
+      if (
+        !(channelKey in userPrefs.notifications) ||
+        !userPrefs.notifications[
+          channelKey as keyof typeof userPrefs.notifications
+        ].enabled
+      ) {
+        res.status(400).json({
+          status: "error",
+          message: "Notification channel is disabled for this user",
+        });
+        return;
+      }
 
-      await kafkaService.produce(NOTIFICATION_TOPIC, kafkaMessage);
+      // Generate content hash for deduplication
+      const contentHash = this.generateContentHash(notificationData);
 
-      logger.info("Notification sent to processing queue", {
-        userId: notificationData.userId,
-        type: notificationData.type,
-      });
+      // Check for duplicate notifications
+      if (
+        await this.isDuplicate(String(notificationData.userId), contentHash)
+      ) {
+        res.status(200).json({
+          status: "success",
+          message: "Similar notification already exists, skipped",
+        });
+        return;
+      }
 
-      res.status(202).json({
-        status: "success",
-        message: "Notification accepted for processing",
-      });
-    } catch (error) {
-      logger.error("Error creating notification:", error);
-      res.status(500).json({ message: "Internal server error" });
-    }
-  };
-
-  private async processKafkaMessage(
-    message: KafkaNotificationMessage
-  ): Promise<void> {
-    try {
-      const { notificationData } = message;
-
-      // Create notification record
+      // Create notification
       const notification = new NotificationModel({
         ...notificationData,
         status: NotificationStatus.PENDING,
-        deliveryAttempts: [],
+        contentHash,
       });
+
+      // Save notification
       await notification.save();
 
-      logger.info("Notification created from Kafka message", {
-        notificationId: notification._id,
+      // Publish to Kafka
+      await this.kafkaService.publish({
+        _id: notification._id,
         userId: notification.userId,
+        message: notification.message,
+        type: notification.type,
+        priority: notification.priority,
+        status: notification.status,
+        scheduledFor: notification.scheduledFor,
+        contentHash: notification.contentHash,
       });
 
-      // Process notification using the processor service
-      await this.processorService.processNotification(notification);
+      // Handle based on priority
+      if (
+        notification.priority === NotificationPriority.HIGH ||
+        notification.priority === NotificationPriority.URGENT
+      ) {
+        // Process high-priority notifications immediately
+        notification.status = NotificationStatus.PROCESSING;
+        await notification.save();
+        await this.deliveryService.deliverNotification(notification);
+      } else if (notification.scheduledFor) {
+        // Schedule for later delivery
+        notification.status = NotificationStatus.SCHEDULED;
+        await notification.save();
+      } else {
+        // Process normal priority notifications
+        await this.deliveryService.deliverNotification(notification);
+      }
+
+      res.status(202).json({
+        status: "success",
+        message: "Notification processed successfully",
+        data: { notificationId: notification._id },
+      });
     } catch (error) {
-      logger.error("Error processing notification from Kafka:", error);
+      logger.error("Error creating notification:", error);
+      res
+        .status(500)
+        .json({ status: "error", message: "Internal server error" });
     }
   }
 
-  public getNotifications = async (
-    req: Request,
-    res: Response
-  ): Promise<void> => {
+  private generateContentHash(data: INotificationCreate): string {
+    const content = `${data.userId}|${data.message}|${data.type}`;
+    return createHash("sha256").update(content).digest("hex");
+  }
+
+  private async isDuplicate(
+    userId: string,
+    contentHash: string
+  ): Promise<boolean> {
+    const oneHourAgo = new Date(Date.now() - this.DEDUP_WINDOW_MS);
+
+    const existingNotification = await NotificationModel.findOne({
+      userId,
+      contentHash,
+      createdAt: { $gte: oneHourAgo },
+      status: { $ne: NotificationStatus.FAILED },
+    });
+
+    return !!existingNotification;
+  }
+
+  public async getNotifications(req: Request, res: Response): Promise<void> {
     try {
       const {
         userId,
         type,
-        category,
         status,
         priority,
         startDate,
@@ -138,7 +188,6 @@ export class NotificationController {
 
       if (userId) query.userId = userId;
       if (type) query.type = type;
-      if (category) query.category = category;
       if (status) query.status = status;
       if (priority) query.priority = priority;
 
@@ -158,6 +207,8 @@ export class NotificationController {
         NotificationModel.countDocuments(query),
       ]);
 
+      const totalPages = Math.ceil(total / Number(limit));
+
       res.status(200).json({
         status: "success",
         data: {
@@ -165,16 +216,15 @@ export class NotificationController {
           pagination: {
             total,
             page: Number(page),
-            pages: Math.ceil(total / Number(limit)),
+            pages: totalPages,
           },
         },
       });
     } catch (error) {
-      logger.error("Error fetching notifications", { error });
-      res.status(500).json({
-        status: "error",
-        message: "Failed to fetch notifications",
-      });
+      logger.error("Error fetching notifications:", error);
+      res
+        .status(500)
+        .json({ status: "error", message: "Internal server error" });
     }
-  };
+  }
 }

@@ -1,13 +1,15 @@
+import { Types } from "mongoose";
+
 export enum NotificationStatus {
   PENDING = "pending",
-  QUEUED = "queued",
   PROCESSING = "processing",
   SENT = "sent",
+  FAILED = "failed",
+  SCHEDULED = "scheduled",
   DELIVERED = "delivered",
   READ = "read",
-  FAILED = "failed",
+  QUEUED = "queued",
   CANCELLED = "cancelled",
-  SCHEDULED = "scheduled",
   AGGREGATED = "aggregated",
 }
 
@@ -24,64 +26,29 @@ export enum NotificationPriority {
   URGENT = "urgent",
 }
 
-export enum NotificationCategory {
-  MARKETING = "marketing",
-  SYSTEM = "system",
-  SECURITY = "security",
-}
-
-export interface INotificationTemplate {
-  name: string;
-  category: NotificationCategory;
-  title: string;
-  content: string;
-  variables: string[];
-}
-
-export interface INotificationDeliveryAttempt {
-  timestamp: Date;
-  status: NotificationStatus;
-  error?: string;
-  provider?: string;
-  metadata?: Record<string, any>;
-}
-
 export interface INotification {
   _id?: string;
-  userId: string;
-  type: NotificationType;
-  category: NotificationCategory;
-  priority: NotificationPriority;
-  templateId?: string;
-  templateData?: Record<string, any>;
-  title: string;
-  content: string;
+  userId: Types.ObjectId;
   message: string;
+  type: NotificationType;
+  priority: NotificationPriority;
   status: NotificationStatus;
-  scheduledTime?: Date;
   scheduledFor?: Date;
-  expiresAt?: Date;
-  deliveryAttempts: INotificationDeliveryAttempt[];
-  metadata?: Record<string, any>;
-  createdAt?: Date;
-  updatedAt?: Date;
   sentAt?: Date;
   deliveredAt?: Date;
   readAt?: Date;
-  batchId?: string;
-  groupId?: string;
-  save(): Promise<INotification>;
+  retryCount: number;
+  lastRetryAt?: Date;
+  contentHash?: string;
+  createdAt?: Date;
+  updatedAt?: Date;
+  aggregatedInto?: string;
 }
 
-export interface INotificationCreate
-  extends Omit<
-    INotification,
-    | "_id"
-    | "status"
-    | "deliveryAttempts"
-    | "createdAt"
-    | "updatedAt"
-    | "sentAt"
-    | "deliveredAt"
-    | "readAt"
-  > {}
+export interface INotificationCreate {
+  userId: Types.ObjectId;
+  message: string;
+  type: NotificationType;
+  priority?: NotificationPriority;
+  scheduledFor?: Date;
+}

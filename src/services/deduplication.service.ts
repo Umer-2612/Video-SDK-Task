@@ -17,22 +17,20 @@ export class DeduplicationService {
   public async isDuplicate(notification: INotification): Promise<boolean> {
     try {
       const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-      
+
       // Check for similar notifications in the last hour
       const duplicate = await NotificationModel.findOne({
         userId: notification.userId,
         type: notification.type,
-        category: notification.category,
-        content: notification.content,
         createdAt: { $gte: oneHourAgo },
-        _id: { $ne: notification._id } // Exclude current notification
+        _id: { $ne: notification._id }, // Exclude current notification
       });
 
       if (duplicate) {
         logger.info("Duplicate notification found", {
           originalId: duplicate._id,
           newId: notification._id,
-          userId: notification.userId
+          userId: notification.userId,
         });
         return true;
       }

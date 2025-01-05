@@ -4,31 +4,39 @@ import { BaseRoute } from "./route.base";
 /**
  * @swagger
  * tags:
- *   name: Home
- *   description: Home endpoint
+ *   name: System
+ *   description: System health and information endpoints
  */
 
 /**
  * @swagger
  * /:
  *   get:
- *     summary: Get home page information
- *     tags: [Home]
+ *     summary: Get system status
+ *     tags: [System]
+ *     description: Returns basic system information and health status
  *     responses:
  *       200:
- *         description: Success
+ *         description: System is healthy
  *         content:
  *           application/json:
  *             schema:
  *               type: object
  *               properties:
- *                 message:
+ *                 status:
  *                   type: string
- *                   example: Hello from TypeScript Server!
+ *                   example: "healthy"
+ *                 version:
+ *                   type: string
+ *                   example: "1.0.0"
+ *                 uptime:
+ *                   type: number
+ *                   description: System uptime in seconds
  *                 timestamp:
  *                   type: string
  *                   format: date-time
- *                   example: 2024-01-04T11:25:30.123Z
+ *       500:
+ *         description: System is unhealthy or error occurred
  */
 export class HomeRoutes extends BaseRoute {
   public path = "/";
