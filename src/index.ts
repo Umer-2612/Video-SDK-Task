@@ -1,57 +1,36 @@
-import express from "express";
+import App from "./server/app";
 import { config } from "./config";
 import { logger } from "./utils/logger";
-import { Server } from "./server/server";
-import { routes } from "./routes";
-import { setupSwagger } from "./swagger";
 
-const app = express();
-const server = new Server(app);
-
-// Setup Swagger before routes
-setupSwagger(app);
-
-// Routes
-app.use(config.api.prefix, routes);
-
-// Default route for root path
-app.get('/', (_req, res) => {
-  res.redirect('/docs');
-});
+const app = new App();
 
 // Start server
-const httpServer = app.listen(config.port, () => {
-  logger.info(`Server listening on port ${config.port}`);
-  logger.info(`API Documentation available at http://localhost:${config.port}/docs`);
-  logger.info(`API Base URL: http://localhost:${config.port}${config.api.prefix}`);
-});
+app.start(config.port);
 
-// Graceful shutdown
+// Graceful shutdown handling
 const gracefulShutdown = async () => {
-  logger.info('Received shutdown signal. Starting graceful shutdown...');
-  
+  logger.info("Received shutdown signal. Starting graceful shutdown...");
   try {
-    await server.closeConnections();
-    httpServer.close(() => {
-      logger.info('Server closed successfully');
-      process.exit(0);
-    });
+    // Add any cleanup logic here
+    process.exit(0);
   } catch (error) {
-    logger.error('Error during shutdown:', error);
+    logger.error("Error during shutdown:", error);
     process.exit(1);
   }
 };
 
 // Handle shutdown signals
-process.on('SIGTERM', gracefulShutdown);
-process.on('SIGINT', gracefulShutdown);
+process.on("SIGTERM", gracefulShutdown);
+process.on("SIGINT", gracefulShutdown);
 
-process.on('uncaughtException', (error: Error) => {
-    console.error('Uncaught Exception:', error);
-    process.exit(1);
+// Handle uncaught exceptions
+process.on("uncaughtException", (error: Error) => {
+  logger.error("Uncaught Exception:", error);
+  process.exit(1);
 });
 
-process.on('unhandledRejection', (reason: any) => {
-    console.error('Unhandled Rejection:', reason);
-    process.exit(1);
+// Handle unhandled promise rejections
+process.on("unhandledRejection", (reason: any) => {
+  logger.error("Unhandled Promise Rejection:", reason);
+  process.exit(1);
 });
