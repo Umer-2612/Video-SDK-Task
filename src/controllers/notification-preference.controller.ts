@@ -3,6 +3,7 @@ import { NotificationPreferenceModel } from "../models/notification-preference.m
 import { UserModel } from "../models/user.model";
 import { logger } from "../utils/logger";
 import { NotificationType } from "../interfaces/notification.interface";
+import { Types } from "mongoose";
 
 export class NotificationPreferenceController {
   private static instance: NotificationPreferenceController;
@@ -26,7 +27,10 @@ export class NotificationPreferenceController {
       const preferenceData = req.body;
 
       // Check if user exists
-      const user = await UserModel.findOne({ userId });
+      const user = await UserModel.findOne({
+        _id: new Types.ObjectId(userId) || userId,
+      });
+
       if (!user) {
         res.status(404).json({ message: "User not found" });
         return;

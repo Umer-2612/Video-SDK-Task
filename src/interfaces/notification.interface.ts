@@ -8,6 +8,7 @@ export enum NotificationStatus {
   FAILED = "failed",
   CANCELLED = "cancelled",
   SCHEDULED = "scheduled",
+  AGGREGATED = "aggregated",
 }
 
 export enum NotificationType {

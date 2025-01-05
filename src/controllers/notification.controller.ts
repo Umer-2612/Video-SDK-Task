@@ -1,22 +1,16 @@
 import { Request, Response } from "express";
 import { NotificationModel } from "../models/notification.model";
-import { NotificationPreferenceModel } from "../models/notification-preference.model";
-import { UserModel } from "../models/user.model";
 import {
   NotificationStatus,
-  NotificationPriority,
-  NotificationType,
   INotificationCreate,
 } from "../interfaces/notification.interface";
 import { logger } from "../utils/logger";
 import kafkaService from "../services/kafka.service";
 import { NotificationProcessorService } from "../services/notification-processor.service";
+import { NotificationValidationService } from "../services/notification-validation.service";
 
 interface KafkaNotificationMessage {
-  notificationId: string;
-  priority: NotificationPriority;
-  type: NotificationType;
-  userId: string;
+  notificationData: INotificationCreate;
 }
 
 const NOTIFICATION_TOPIC = "notifications";
@@ -24,9 +18,11 @@ const NOTIFICATION_TOPIC = "notifications";
 export class NotificationController {
   private static instance: NotificationController;
   private readonly processorService: NotificationProcessorService;
+  private readonly validationService: NotificationValidationService;
 
   private constructor() {
     this.processorService = NotificationProcessorService.getInstance();
+    this.validationService = NotificationValidationService.getInstance();
     this.initializeKafka();
   }
 
@@ -40,7 +36,7 @@ export class NotificationController {
         NOTIFICATION_TOPIC,
         "notification-processor",
         async (message) => {
-          await this.processNotification(message);
+          await this.processKafkaMessage(message);
         }
       );
     } catch (error) {
@@ -62,61 +58,64 @@ export class NotificationController {
     try {
       const notificationData: INotificationCreate = req.body;
 
-      // Check if user exists
-      const user = await UserModel.findOne({ userId: notificationData.userId });
-      if (!user) {
-        res.status(404).json({ message: "User not found" });
-        return;
-      }
-
-      // Get user preferences
-      const preferences = await NotificationPreferenceModel.findOne({
-        userId: notificationData.userId,
-      });
-
-      // Check if user has enabled this notification type
-      if (
-        preferences &&
-        !preferences.channels[notificationData.type]?.enabled
-      ) {
+      // Validate notification data
+      const validationResult =
+        await this.validationService.validateNotification(notificationData);
+      if (!validationResult.isValid) {
         res.status(400).json({
           status: "error",
-          message: `User has disabled ${notificationData.type} notifications`,
+          errors: validationResult.errors,
         });
         return;
       }
 
-      // Create notification record
-      const notification = new NotificationModel({
-        ...notificationData,
-        status: NotificationStatus.PENDING,
-      });
-      await notification.save();
-
       // Send to Kafka for processing
       const kafkaMessage: KafkaNotificationMessage = {
-        notificationId: notification._id.toString(),
-        priority: notification.priority,
-        type: notification.type,
-        userId: notification.userId,
+        notificationData,
       };
 
       await kafkaService.produce(NOTIFICATION_TOPIC, kafkaMessage);
 
-      logger.info("Notification created successfully", {
-        notificationId: notification._id,
-        userId: notification.userId,
+      logger.info("Notification sent to processing queue", {
+        userId: notificationData.userId,
+        type: notificationData.type,
       });
 
-      res.status(201).json({
-        message: "Notification created successfully",
-        notification,
+      res.status(202).json({
+        status: "success",
+        message: "Notification accepted for processing",
       });
     } catch (error) {
       logger.error("Error creating notification:", error);
       res.status(500).json({ message: "Internal server error" });
     }
   };
+
+  private async processKafkaMessage(
+    message: KafkaNotificationMessage
+  ): Promise<void> {
+    try {
+      const { notificationData } = message;
+
+      // Create notification record
+      const notification = new NotificationModel({
+        ...notificationData,
+        status: NotificationStatus.PENDING,
+        deliveryAttempts: [],
+      });
+      await notification.save();
+
+      logger.info("Notification created from Kafka message", {
+        notificationId: notification._id,
+        userId: notification.userId,
+      });
+
+      // Process notification using the processor service
+      await this.processorService.processNotification(notification);
+    } catch (error) {
+      logger.error("Error processing notification from Kafka:", error);
+    }
+  }
 
   public getNotifications = async (
     req: Request,
@@ -178,24 +177,4 @@ export class NotificationController {
       });
     }
   };
-
-  private async processNotification(
-    message: KafkaNotificationMessage
-  ): Promise<void> {
-    try {
-      const { notificationId } = message;
-
-      // Fetch notification from database
-      const notification = await NotificationModel.findById(notificationId);
-      if (!notification) {
-        logger.error(`Notification not found: ${notificationId}`);
-        return;
-      }
-
-      // Process notification using the processor service
-      await this.processorService.processNotification(notification);
-    } catch (error) {
-      logger.error("Error processing notification from Kafka:", error);
-    }
-  }
 }

@@ -8,40 +8,62 @@ import {
   NotificationType,
 } from "../interfaces/notification.interface";
 import { INotificationPreference } from "../interfaces/notification-preference.interface";
+import { DeduplicationService } from "./deduplication.service";
+import { NotificationDeliveryService } from "./notification-delivery.service";
 
 export class NotificationProcessorService {
   private static instance: NotificationProcessorService;
+  private readonly deduplicationService: DeduplicationService;
+  private readonly deliveryService: NotificationDeliveryService;
 
-  private constructor() {}
+  private constructor() {
+    this.deduplicationService = DeduplicationService.getInstance();
+    this.deliveryService = NotificationDeliveryService.getInstance();
+  }
 
   public static getInstance(): NotificationProcessorService {
     if (!NotificationProcessorService.instance) {
-      NotificationProcessorService.instance = new NotificationProcessorService();
+      NotificationProcessorService.instance =
+        new NotificationProcessorService();
     }
     return NotificationProcessorService.instance;
   }
 
   public async processNotification(notification: INotification): Promise<void> {
     try {
+      // Check for duplicates first
+      if (await this.deduplicationService.isDuplicate(notification)) {
+        await this.markNotificationDuplicate(notification);
+        return;
+      }
+
       const preferences = await NotificationPreferenceModel.findOne({
         userId: notification.userId,
       });
 
       if (!preferences) {
-        logger.error(`User preferences not found for user: ${notification.userId}`);
-        await this.markNotificationFailed(notification, "User preferences not found");
+        logger.error(
+          `User preferences not found for user: ${notification.userId}`
+        );
+        await this.markNotificationFailed(
+          notification,
+          "User preferences not found"
+        );
         return;
       }
 
       // Check if notification type is enabled
       if (!preferences.channels[notification.type]?.enabled) {
-        await this.markNotificationFailed(notification, `${notification.type} notifications are disabled`);
+        await this.markNotificationFailed(
+          notification,
+          `${notification.type} notifications are disabled`
+        );
         return;
       }
 
       // Process based on priority and scheduling
       if (this.isHighPriority(notification)) {
-        await this.processHighPriorityNotification(notification, preferences);
+        await this.processHighPriorityNotification(notification);
       } else {
         await this.processStandardNotification(notification, preferences);
       }
@@ -52,11 +74,10 @@ export class NotificationProcessorService {
   }
 
   private async processHighPriorityNotification(
-    notification: INotification,
-    _preferences: INotificationPreference
+    notification: INotification
   ): Promise<void> {
     // High priority notifications bypass quiet hours and rate limits
-    await this.deliverNotification(notification);
+    await this.deliveryService.deliverNotification(notification);
   }
 
   private async processStandardNotification(
@@ -75,8 +96,14 @@ export class NotificationProcessorService {
       return;
     }
 
+    // For low priority notifications, schedule them for aggregation
+    if (notification.priority === NotificationPriority.LOW) {
+      await this.scheduleLowPriorityNotification(notification);
+      return;
+    }
+
     // Process notification
-    await this.deliverNotification(notification);
+    await this.deliveryService.deliverNotification(notification);
   }
 
   private isHighPriority(notification: INotification): boolean {
@@ -95,7 +122,9 @@ export class NotificationProcessorService {
 
     // Check global quiet hours
     if (preferences.globalQuietHours?.enabled) {
-      const globalStart = this.timeToMinutes(preferences.globalQuietHours.start);
+      const globalStart = this.timeToMinutes(
+        preferences.globalQuietHours.start
+      );
       const globalEnd = this.timeToMinutes(preferences.globalQuietHours.end);
       if (this.isTimeInRange(currentTime, globalStart, globalEnd)) {
         return true;
@@ -132,8 +161,10 @@ export class NotificationProcessorService {
     preferences: INotificationPreference
   ): Promise<boolean> {
     const channelPrefs = preferences.channels[notification.type];
-    const hourlyLimit = channelPrefs?.limits?.hourly ?? preferences.globalLimits?.hourly;
-    const dailyLimit = channelPrefs?.limits?.daily ?? preferences.globalLimits?.daily;
+    const hourlyLimit =
+      channelPrefs?.limits?.hourly ?? preferences.globalLimits?.hourly;
+    const dailyLimit =
+      channelPrefs?.limits?.daily ?? preferences.globalLimits?.daily;
 
     if (!hourlyLimit && !dailyLimit) {
       return false;
@@ -189,7 +220,10 @@ export class NotificationProcessorService {
     notification: INotification,
     preferences: INotificationPreference
   ): Promise<void> {
-    const nextActiveTime = this.calculateNextActiveTime(preferences, notification.type);
+    const nextActiveTime = this.calculateNextActiveTime(
+      preferences,
+      notification.type
+    );
 
     await NotificationModel.findByIdAndUpdate(notification._id, {
       status: NotificationStatus.QUEUED,
@@ -208,13 +242,15 @@ export class NotificationProcessorService {
   ): Date {
     const now = new Date();
     const currentTime = now.getHours() * 100 + now.getMinutes();
-    
+
     // Check global quiet hours
     if (preferences.globalQuietHours?.enabled) {
       const globalEnd = this.timeToMinutes(preferences.globalQuietHours.end);
       if (currentTime < globalEnd) {
         const nextTime = new Date();
-        const [hours, minutes] = preferences.globalQuietHours.end.split(':').map(Number);
+        const [hours, minutes] = preferences.globalQuietHours.end
+          .split(":")
+          .map(Number);
         nextTime.setHours(hours, minutes, 0, 0);
         return nextTime;
       }
@@ -226,7 +262,9 @@ export class NotificationProcessorService {
       const end = this.timeToMinutes(channelPrefs.quietHours.end);
       if (currentTime < end) {
         const nextTime = new Date();
-        const [hours, minutes] = channelPrefs.quietHours.end.split(':').map(Number);
+        const [hours, minutes] = channelPrefs.quietHours.end
+          .split(":")
+          .map(Number);
         nextTime.setHours(hours, minutes, 0, 0);
         return nextTime;
       }
@@ -238,30 +276,38 @@ export class NotificationProcessorService {
     return nextTime;
   }
 
-  private async deliverNotification(notification: INotification): Promise<void> {
-    try {
-      // Update status to processing
-      await NotificationModel.findByIdAndUpdate(notification._id, {
-        status: NotificationStatus.PROCESSING,
-      });
+  private async scheduleLowPriorityNotification(
+    notification: INotification
+  ): Promise<void> {
+    // Schedule for the next hour boundary
+    const nextHour = new Date();
+    nextHour.setHours(nextHour.getHours() + 1);
+    nextHour.setMinutes(0, 0, 0);
 
-      // TODO: Implement actual delivery logic here
-      // This would integrate with email/SMS/push notification services
+    await NotificationModel.findByIdAndUpdate(notification._id, {
+      status: NotificationStatus.SCHEDULED,
+      scheduledFor: nextHour,
+    });
 
-      // For now, just mark as delivered
-      await NotificationModel.findByIdAndUpdate(notification._id, {
-        status: NotificationStatus.DELIVERED,
-        deliveredAt: new Date(),
-      });
+    logger.info("Low priority notification scheduled for aggregation", {
+      notificationId: notification._id,
+      scheduledFor: nextHour,
+    });
+  }
 
-      logger.info("Notification delivered successfully", {
-        notificationId: notification._id,
-        type: notification.type,
-      });
-    } catch (error) {
-      logger.error("Error delivering notification:", error);
-      await this.markNotificationFailed(notification, "Delivery failed");
-    }
+  private async markNotificationDuplicate(
+    notification: INotification
+  ): Promise<void> {
+    await NotificationModel.findByIdAndUpdate(notification._id, {
+      status: NotificationStatus.CANCELLED,
+      $push: {
+        deliveryAttempts: {
+          timestamp: new Date(),
+          status: NotificationStatus.CANCELLED,
+          error: "Duplicate notification detected",
+        },
+      },
+    });
   }
 
   private async markNotificationFailed(

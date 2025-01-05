@@ -1,143 +1,186 @@
-import { Kafka, Producer, Consumer } from "kafkajs";
+import { Kafka, Producer, Consumer, Admin, ITopicConfig } from "kafkajs";
 import { logger } from "../utils/logger";
-import { kafkaConfig } from "../config/kafka.config";
+
+const DEAD_LETTER_TOPIC = "notifications.dlq";
+const MAX_RETRIES = 3;
 
 class KafkaService {
+  private static instance: KafkaService;
   private kafka: Kafka;
   private producer: Producer;
-  private consumers: Map<string, Consumer>;
+  private admin: Admin;
+  private consumers: Map<string, Consumer> = new Map();
+  private connected: boolean = false;
+  private connectionRetries: number = 0;
 
-  constructor() {
-    this.kafka = new Kafka(kafkaConfig);
-    this.producer = this.kafka.producer();
-    this.consumers = new Map();
+  private constructor() {
+    this.kafka = new Kafka({
+      clientId: "notification-service",
+      brokers: (process.env.KAFKA_BROKERS || "kafka:29092").split(","),
+      retry: {
+        initialRetryTime: 100,
+        retries: 8,
+      },
+    });
+    this.producer = this.kafka.producer({
+      retry: { retries: MAX_RETRIES },
+    });
+    this.admin = this.kafka.admin();
   }
 
-  async connect(): Promise<void> {
-    let retries = 5;
-    let lastError;
+  public static getInstance(): KafkaService {
+    if (!KafkaService.instance) {
+      KafkaService.instance = new KafkaService();
+    }
+    return KafkaService.instance;
+  }
 
-    while (retries > 0) {
-      try {
-        await this.producer.connect();
-        logger.info("Connected to Kafka");
-        return;
-      } catch (error) {
-        lastError = error;
-        logger.warn(`Failed to connect to Kafka. Retries left: ${retries}`);
-        retries--;
-        if (retries > 0) {
-          await new Promise((resolve) => setTimeout(resolve, 5000)); // Wait 5 seconds before retrying
-        }
+  public async connect(): Promise<void> {
+    try {
+      await this.producer.connect();
+      await this.admin.connect();
+      this.connected = true;
+      this.connectionRetries = 0;
+      logger.info("Successfully connected to Kafka");
+    } catch (error) {
+      this.connectionRetries++;
+      logger.error("Failed to connect to Kafka:", error);
+
+      if (this.connectionRetries < MAX_RETRIES) {
+        const retryDelay = Math.pow(2, this.connectionRetries) * 1000;
+        logger.info(`Retrying connection in ${retryDelay}ms...`);
+        await new Promise((resolve) => setTimeout(resolve, retryDelay));
+        await this.connect();
+      } else {
+        throw new Error("Max connection retries reached");
       }
     }
-
-    logger.error("Failed to connect to Kafka after all retries", lastError);
-    throw lastError;
   }
 
-  async disconnect(): Promise<void> {
+  public async createTopic(topic: string): Promise<void> {
+    try {
+      const topics: ITopicConfig[] = [
+        {
+          topic,
+          numPartitions: 3,
+          replicationFactor: 1,
+        },
+      ];
+
+      await this.admin.createTopics({
+        topics,
+        waitForLeaders: true,
+      });
+
+      // Also create DLQ topic if it doesn't exist
+      await this.admin.createTopics({
+        topics: [
+          {
+            topic: DEAD_LETTER_TOPIC,
+            numPartitions: 1,
+            replicationFactor: 1,
+          },
+        ],
+        waitForLeaders: true,
+      });
+    } catch (error: any) {
+      if (!(error.message || "").includes("already exists")) {
+        throw error;
+      }
+    }
+  }
+
+  public async produce(topic: string, message: any): Promise<void> {
+    try {
+      if (!this.connected) {
+        await this.connect();
+      }
+
+      await this.producer.send({
+        topic,
+        messages: [{ value: JSON.stringify(message) }],
+      });
+    } catch (error: any) {
+      logger.error("Error producing message:", error);
+      await this.handleProducerError(topic, message, error);
+    }
+  }
+
+  private async handleProducerError(
+    topic: string,
+    message: any,
+    error: Error
+  ): Promise<void> {
+    // Send to Dead Letter Queue
+    try {
+      await this.producer.send({
+        topic: DEAD_LETTER_TOPIC,
+        messages: [
+          {
+            value: JSON.stringify({
+              originalTopic: topic,
+              message,
+              error: error.message,
+              timestamp: new Date().toISOString(),
+            }),
+          },
+        ],
+      });
+    } catch (dlqError) {
+      logger.error("Failed to send message to DLQ:", dlqError);
+      throw error; // Re-throw original error if DLQ fails
+    }
+  }
+
+  public async consume(
+    topic: string,
+    groupId: string,
+    callback: (message: any) => Promise<void>
+  ): Promise<void> {
+    const consumer = this.kafka.consumer({ groupId });
+    this.consumers.set(groupId, consumer);
+
+    try {
+      await consumer.connect();
+      await consumer.subscribe({ topic, fromBeginning: false });
+
+      await consumer.run({
+        eachMessage: async ({ message }) => {
+          try {
+            const messageValue = JSON.parse(message.value?.toString() || "");
+            await callback(messageValue);
+          } catch (error: any) {
+            logger.error("Error processing message:", error);
+            await this.handleConsumerError(topic, message.value, error);
+          }
+        },
+      });
+    } catch (error: any) {
+      logger.error("Consumer error:", error);
+      await this.handleConsumerError(topic, null, error);
+    }
+  }
+
+  private async handleConsumerError(
+    topic: string,
+    message: any,
+    error: Error
+  ): Promise<void> {
+    await this.handleProducerError(topic, message, error);
+  }
+
+  public async disconnect(): Promise<void> {
     try {
       await this.producer.disconnect();
       for (const consumer of this.consumers.values()) {
         await consumer.disconnect();
       }
-      logger.info("Disconnected from Kafka");
+      await this.admin.disconnect();
+      this.connected = false;
     } catch (error) {
-      logger.error("Failed to disconnect from Kafka", error);
-      throw error;
-    }
-  }
-
-  async createTopic(topic: string): Promise<void> {
-    const admin = this.kafka.admin();
-    try {
-      await admin.connect();
-      const existingTopics = await admin.listTopics();
-
-      if (!existingTopics.includes(topic)) {
-        await admin.createTopics({
-          topics: [
-            {
-              topic,
-              numPartitions: 1,
-              replicationFactor: 1,
-            },
-          ],
-        });
-        logger.info(`Created Kafka topic: ${topic}`);
-      } else {
-        logger.info(`Kafka topic already exists: ${topic}`);
-      }
-    } catch (error: any) {
-      logger.error("Failed to create Kafka topic", error);
-      // Don't throw error if topic already exists
-      if (!(error.message && error.message.includes("Topic already exists"))) {
-        throw error;
-      }
-    } finally {
-      await admin.disconnect();
-    }
-  }
-
-  async produce(topic: string, message: any): Promise<void> {
-    try {
-      await this.producer.send({
-        topic,
-        messages: [
-          {
-            value: JSON.stringify(message),
-          },
-        ],
-      });
-      logger.info(`Message sent to topic: ${topic}`);
-    } catch (error) {
-      logger.error(`Failed to send message to topic: ${topic}`, error);
-      throw error;
-    }
-  }
-
-  async consume(
-    topic: string,
-    groupId: string,
-    callback: (message: any) => Promise<void>
-  ): Promise<void> {
-    if (!this.consumers.has(groupId)) {
-      const consumer = this.kafka.consumer({ groupId });
-      this.consumers.set(groupId, consumer);
-
-      try {
-        await consumer.connect();
-        await consumer.subscribe({ topic, fromBeginning: true });
-
-        await consumer.run({
-          eachMessage: async ({ message }) => {
-            try {
-              const value = message.value?.toString();
-              if (value) {
-                const parsedMessage = JSON.parse(value);
-                await callback(parsedMessage);
-              }
-            } catch (error) {
-              logger.error(
-                `Error processing message from topic ${topic}`,
-                error
-              );
-            }
-          },
-        });
-
-        logger.info(
-          `Consumer started for topic: ${topic}, groupId: ${groupId}`
-        );
-      } catch (error) {
-        logger.error(`Failed to set up consumer for topic ${topic}`, error);
-        this.consumers.delete(groupId);
-        throw error;
-      }
+      logger.error("Error disconnecting from Kafka:", error);
     }
   }
 }
 
-export const kafkaService = new KafkaService();
-export default kafkaService;
+export default KafkaService.getInstance();
