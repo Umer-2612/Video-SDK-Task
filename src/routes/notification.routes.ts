@@ -1,6 +1,5 @@
 import { Router } from "express";
 import { NotificationController } from "../controllers/notification.controller";
-import { validateNotification } from "../middleware/notification.validator";
 import { BaseRoute } from "./route.base";
 
 /**
@@ -25,7 +24,7 @@ import { BaseRoute } from "./route.base";
  *         - read
  *         - failed
  *         - cancelled
- *     
+ *
  *     NotificationType:
  *       type: string
  *       enum:
@@ -33,7 +32,7 @@ import { BaseRoute } from "./route.base";
  *         - push
  *         - sms
  *         - webhook
- *     
+ *
  *     NotificationPriority:
  *       type: string
  *       enum:
@@ -41,14 +40,14 @@ import { BaseRoute } from "./route.base";
  *         - medium
  *         - high
  *         - urgent
- *     
+ *
  *     NotificationCategory:
  *       type: string
  *       enum:
  *         - marketing
  *         - system
  *         - security
- *     
+ *
  *     NotificationCreate:
  *       type: object
  *       required:
@@ -99,7 +98,7 @@ import { BaseRoute } from "./route.base";
  *         groupId:
  *           type: string
  *           description: ID for grouping related notifications
- *     
+ *
  *     Notification:
  *       allOf:
  *         - $ref: '#/components/schemas/NotificationCreate'
@@ -145,7 +144,7 @@ import { BaseRoute } from "./route.base";
 
 /**
  * @swagger
- * /notifications/notify:
+ * /notifications:
  *   post:
  *     summary: Create a new notification
  *     tags: [Notifications]
@@ -154,10 +153,71 @@ import { BaseRoute } from "./route.base";
  *       content:
  *         application/json:
  *           schema:
- *             $ref: '#/components/schemas/NotificationCreate'
+ *             type: object
+ *             required:
+ *               - userId
+ *               - type
+ *               - category
+ *               - title
+ *               - content
+ *               - message
+ *             properties:
+ *               userId:
+ *                 type: string
+ *                 description: ID of the user to receive the notification
+ *               type:
+ *                 type: string
+ *                 enum: [email, sms, push]
+ *                 description: Type of notification (must be enabled for the user)
+ *               category:
+ *                 type: string
+ *                 enum: [marketing, system, security]
+ *                 description: Category of the notification
+ *               title:
+ *                 type: string
+ *                 description: Title of the notification
+ *               content:
+ *                 type: string
+ *                 description: Detailed content of the notification
+ *               message:
+ *                 type: string
+ *                 description: Short message for the notification
+ *               metadata:
+ *                 type: object
+ *                 description: Additional metadata for the notification
+ *               scheduledFor:
+ *                 type: string
+ *                 format: date-time
+ *                 description: When to send the notification (must be in the future)
+ *               expiresAt:
+ *                 type: string
+ *                 format: date-time
+ *                 description: When the notification expires
+ *           examples:
+ *             basic:
+ *               value:
+ *                 userId: "user123"
+ *                 type: "email"
+ *                 category: "system"
+ *                 title: "Account Security Update"
+ *                 content: "We noticed a login from a new device. Please verify if this was you."
+ *                 message: "New device login detected on your account"
+ *                 metadata:
+ *                   deviceType: "iPhone"
+ *                   location: "San Francisco, CA"
+ *             scheduled:
+ *               value:
+ *                 userId: "user456"
+ *                 type: "sms"
+ *                 category: "marketing"
+ *                 title: "Appointment Reminder"
+ *                 content: "Your doctor's appointment is scheduled for tomorrow at 2 PM"
+ *                 message: "Reminder: Doctor appointment tomorrow 2 PM"
+ *                 scheduledFor: "2025-01-06T08:30:00.000Z"
+ *                 expiresAt: "2025-01-06T14:30:00.000Z"
  *     responses:
- *       201:
- *         description: Notification created successfully
+ *       202:
+ *         description: Notification accepted for processing
  *         content:
  *           application/json:
  *             schema:
@@ -165,35 +225,42 @@ import { BaseRoute } from "./route.base";
  *               properties:
  *                 status:
  *                   type: string
- *                   example: success
- *                 data:
- *                   type: object
- *                   properties:
- *                     notification:
- *                       type: object
- *                       properties:
- *                         id:
- *                           type: string
- *                         userId:
- *                           type: string
- *                         type:
- *                           $ref: '#/components/schemas/NotificationType'
- *                         category:
- *                           $ref: '#/components/schemas/NotificationCategory'
- *                         priority:
- *                           $ref: '#/components/schemas/NotificationPriority'
- *                         status:
- *                           $ref: '#/components/schemas/NotificationStatus'
- *                         scheduledFor:
- *                           type: string
- *                           format: date-time
- *                         createdAt:
- *                           type: string
- *                           format: date-time
+ *                   example: "success"
+ *                 message:
+ *                   type: string
+ *                   example: "Notification accepted for processing"
  *       400:
- *         description: Invalid input data
- *       404:
- *         description: User not found
+ *         description: Invalid request data
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: "error"
+ *                 message:
+ *                   type: string
+ *                   example: "Invalid notification data"
+ *                 errors:
+ *                   type: array
+ *                   items:
+ *                     type: string
+ *                   example: [
+ *                     "category is required",
+ *                     "Invalid notification type",
+ *                     "Invalid notification category"
+ *                   ]
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Internal server error"
  */
 
 /**
@@ -295,11 +362,7 @@ export class NotificationRoutes extends BaseRoute {
 
   private initializeRoutes(): void {
     // Create notification
-    this.router.post(
-      "/notify",
-      validateNotification,
-      this.controller.createNotification
-    );
+    this.router.post("/", this.controller.createNotification);
 
     // Get notifications with filters
     this.router.get("/", this.controller.getNotifications);
